@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+pg8000
+python-dotenv
+bcrypt
+PyJWT
+email-validator
+httpx
