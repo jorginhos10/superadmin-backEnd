@@ -4,6 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
+
 from app.auth import get_current_user
 from app.database import get_connection
 from app.schemas import UserOut
@@ -28,6 +29,7 @@ class SoporteMensajeOut(BaseModel):
     ticket_id: int
     de: str
     mensaje: str
+    imagen_url: Optional[str] = None
     created_at: datetime
 
 
@@ -42,7 +44,7 @@ class SoporteEstadoIn(BaseModel):
 TICKET_COLUMNS = [
     "id", "comercio_id", "asunto", "estado", "no_leidos_superadmin", "created_at", "updated_at",
 ]
-MENSAJE_COLUMNS = ["id", "ticket_id", "de", "mensaje", "created_at"]
+MENSAJE_COLUMNS = ["id", "ticket_id", "de", "mensaje", "imagen_url", "created_at"]
 
 
 def _get_ticket_or_404(conn, ticket_id: int) -> dict:

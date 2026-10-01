@@ -7,6 +7,9 @@ load_dotenv()
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.ajustes import router as ajustes_router
+from app.apariencias import router as apariencias_router
+from app.apps import router as apps_router
 from app.auth import router as auth_router
 from app.chat_soporte import router as chat_soporte_router
 from app.comercios import router as comercios_router
@@ -30,6 +33,9 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(ajustes_router)
+app.include_router(apariencias_router)
+app.include_router(apps_router)
 app.include_router(chat_soporte_router)
 app.include_router(comercios_router)
 app.include_router(dashboard_router)

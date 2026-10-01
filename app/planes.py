@@ -1,7 +1,7 @@
 import json
 import re
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pg8000.exceptions import DatabaseError
@@ -18,8 +18,11 @@ UNIQUE_VIOLATION = "23505"
 PLAN_COLUMNS = [
     "id", "nombre", "slug", "descripcion", "precio", "periodo", "color",
     "caracteristicas", "modulos", "destacado", "predeterminado", "activo", "orden", "visibilidad",
-    "pais", "moneda", "fecha_creacion",
+    "pais", "moneda", "dias_gratis", "tipo_comercio", "fecha_creacion",
 ]
+
+
+TipoComercio = Literal["restobar", "store"]
 
 
 class PlanIn(BaseModel):
@@ -37,6 +40,10 @@ class PlanIn(BaseModel):
     comercios: list[int] = []
     pais: str = "CO"
     moneda: str = "COP"
+    # Free time gifted on subscribing; it postpones the first billing date. Only meaningful for paid plans.
+    dias_gratis: int = Field(default=0, ge=0, le=365)
+    # Which kind of commerce the plan is offered to (each type has its own list of plans).
+    tipo_comercio: TipoComercio = "restobar"
 
 
 class PlanOut(BaseModel):
@@ -56,8 +63,15 @@ class PlanOut(BaseModel):
     visibilidad: str
     pais: str
     moneda: str
+    dias_gratis: int = 0
+    tipo_comercio: str = "restobar"
     fecha_creacion: datetime
     comercios: list[int] = []
+
+
+def _dias_gratis(payload: PlanIn) -> int:
+    """A free plan has nothing to postpone, so free time only applies to paid plans."""
+    return payload.dias_gratis if payload.precio > 0 else 0
 
 
 def _slugify(raw: str) -> str:
@@ -91,10 +105,16 @@ def _guardar_comercios(conn, plan_id: int, visibilidad: str, comercios: list[int
 
 
 @router.get("", response_model=list[PlanOut])
-def listar_planes(current_user: UserOut = Depends(get_current_user)):
+def listar_planes(tipo: Optional[TipoComercio] = None, current_user: UserOut = Depends(get_current_user)):
     conn = get_connection()
     try:
-        rows = conn.run(f"SELECT {', '.join(PLAN_COLUMNS)} FROM planes ORDER BY orden ASC, id ASC")
+        if tipo:
+            rows = conn.run(
+                f"SELECT {', '.join(PLAN_COLUMNS)} FROM planes WHERE tipo_comercio = :tipo ORDER BY orden ASC, id ASC",
+                tipo=tipo,
+            )
+        else:
+            rows = conn.run(f"SELECT {', '.join(PLAN_COLUMNS)} FROM planes ORDER BY orden ASC, id ASC")
         planes = [_row_to_dict(row) for row in rows]
 
         comercios_rows = conn.run("SELECT plan_id, comercio_id FROM plan_comercios")
@@ -122,15 +142,16 @@ def crear_plan(payload: PlanIn, current_user: UserOut = Depends(get_current_user
         try:
             rows = conn.run(
                 """
-                INSERT INTO planes (nombre, slug, descripcion, precio, periodo, color, caracteristicas, modulos, destacado, orden, visibilidad, pais, moneda)
-                VALUES (:nombre, :slug, :descripcion, :precio, :periodo, :color, :caracteristicas, :modulos, :destacado, :orden, :visibilidad, :pais, :moneda)
+                INSERT INTO planes (nombre, slug, descripcion, precio, periodo, color, caracteristicas, modulos, destacado, orden, visibilidad, pais, moneda, dias_gratis, tipo_comercio)
+                VALUES (:nombre, :slug, :descripcion, :precio, :periodo, :color, :caracteristicas, :modulos, :destacado, :orden, :visibilidad, :pais, :moneda, :dias_gratis, :tipo)
                 RETURNING id
                 """,
                 nombre=payload.nombre.strip(), slug=slug, descripcion=payload.descripcion,
                 precio=payload.precio, periodo=payload.periodo, color=payload.color,
                 caracteristicas=json.dumps([c.strip() for c in payload.caracteristicas if c.strip()]),
                 modulos=json.dumps(payload.modulos), destacado=payload.destacado, orden=payload.orden,
-                visibilidad=visibilidad, pais=payload.pais, moneda=payload.moneda,
+                visibilidad=visibilidad, pais=payload.pais, moneda=payload.moneda, dias_gratis=_dias_gratis(payload),
+                tipo=payload.tipo_comercio,
             )
         except DatabaseError as exc:
             if exc.args and exc.args[0].get("C") == UNIQUE_VIOLATION:
@@ -139,7 +160,10 @@ def crear_plan(payload: PlanIn, current_user: UserOut = Depends(get_current_user
 
         plan_id = rows[0][0]
         if payload.destacado:
-            conn.run("UPDATE planes SET destacado = false WHERE id != :id", id=plan_id)
+            conn.run(
+                "UPDATE planes SET destacado = false WHERE pais = :pais AND tipo_comercio = :tipo AND id != :id",
+                pais=payload.pais, tipo=payload.tipo_comercio, id=plan_id,
+            )
         _guardar_comercios(conn, plan_id, visibilidad, payload.comercios)
         return _fetch_plan(conn, plan_id)
     finally:
@@ -161,14 +185,16 @@ def editar_plan(plan_id: int, payload: PlanIn, current_user: UserOut = Depends(g
                 """
                 UPDATE planes SET nombre=:nombre, slug=:slug, descripcion=:descripcion, precio=:precio,
                     periodo=:periodo, color=:color, caracteristicas=:caracteristicas, modulos=:modulos,
-                    destacado=:destacado, orden=:orden, visibilidad=:visibilidad, pais=:pais, moneda=:moneda
+                    destacado=:destacado, orden=:orden, visibilidad=:visibilidad, pais=:pais, moneda=:moneda,
+                    dias_gratis=:dias_gratis, tipo_comercio=:tipo
                 WHERE id=:id
                 """,
                 nombre=payload.nombre.strip(), slug=slug, descripcion=payload.descripcion,
                 precio=payload.precio, periodo=payload.periodo, color=payload.color,
                 caracteristicas=json.dumps([c.strip() for c in payload.caracteristicas if c.strip()]),
                 modulos=json.dumps(payload.modulos), destacado=payload.destacado, orden=payload.orden,
-                visibilidad=visibilidad, pais=payload.pais, moneda=payload.moneda, id=plan_id,
+                visibilidad=visibilidad, pais=payload.pais, moneda=payload.moneda, dias_gratis=_dias_gratis(payload),
+                tipo=payload.tipo_comercio, id=plan_id,
             )
         except DatabaseError as exc:
             if exc.args and exc.args[0].get("C") == UNIQUE_VIOLATION:
@@ -176,7 +202,10 @@ def editar_plan(plan_id: int, payload: PlanIn, current_user: UserOut = Depends(g
             raise
 
         if payload.destacado:
-            conn.run("UPDATE planes SET destacado = false WHERE id != :id", id=plan_id)
+            conn.run(
+                "UPDATE planes SET destacado = false WHERE pais = :pais AND tipo_comercio = :tipo AND id != :id",
+                pais=payload.pais, tipo=payload.tipo_comercio, id=plan_id,
+            )
         _guardar_comercios(conn, plan_id, visibilidad, payload.comercios)
         return _fetch_plan(conn, plan_id)
     finally:
@@ -207,11 +236,14 @@ def toggle_activo(plan_id: int, current_user: UserOut = Depends(get_current_user
 
 @router.post("/{plan_id}/destacar", response_model=PlanOut)
 def destacar(plan_id: int, current_user: UserOut = Depends(get_current_user)):
-    """Only one plan can be featured at a time."""
+    """Only one plan per país and type of commerce can be featured at a time."""
     conn = get_connection()
     try:
-        _fetch_plan(conn, plan_id)
-        conn.run("UPDATE planes SET destacado = false")
+        plan = _fetch_plan(conn, plan_id)
+        conn.run(
+            "UPDATE planes SET destacado = false WHERE pais = :pais AND tipo_comercio = :tipo",
+            pais=plan.pais, tipo=plan.tipo_comercio,
+        )
         conn.run("UPDATE planes SET destacado = true WHERE id = :id", id=plan_id)
         return _fetch_plan(conn, plan_id)
     finally:
@@ -220,11 +252,11 @@ def destacar(plan_id: int, current_user: UserOut = Depends(get_current_user)):
 
 @router.post("/{plan_id}/predeterminado", response_model=PlanOut)
 def marcar_predeterminado(plan_id: int, current_user: UserOut = Depends(get_current_user)):
-    """Only one plan can be the automatic default assigned on signup."""
+    """Only one plan per país can be the automatic default assigned on signup."""
     conn = get_connection()
     try:
-        _fetch_plan(conn, plan_id)
-        conn.run("UPDATE planes SET predeterminado = false")
+        plan = _fetch_plan(conn, plan_id)
+        conn.run("UPDATE planes SET predeterminado = false WHERE pais = :pais", pais=plan.pais)
         conn.run("UPDATE planes SET predeterminado = true WHERE id = :id", id=plan_id)
         return _fetch_plan(conn, plan_id)
     finally:
