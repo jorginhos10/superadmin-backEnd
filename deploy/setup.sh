@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-REPO_URL="REPLACE_WITH_SUPERADMIN_BACKEND_GIT_REMOTE"
+REPO_URL="https://github.com/jorginhos10/superadmin-backEnd.git"
 APP_DIR="/opt/chefcontrol-superadmin-backend"
 SERVICE_USER="superadmin"
 
