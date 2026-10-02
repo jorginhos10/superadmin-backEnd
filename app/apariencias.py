@@ -35,6 +35,7 @@ class AparienciaReglaOut(BaseModel):
     visibilidad: str
     comercios: list[int] = []
     imagen: str | None = None
+    automatico_default: bool = False
 
 
 class AparienciaImagenIn(BaseModel):
@@ -53,6 +54,11 @@ class AparienciaReglaIn(BaseModel):
     comercios: list[int] = []
 
 
+def _leer_automatico_default(conn) -> str:
+    rows = conn.run("SELECT apariencia_key FROM apariencia_automatico WHERE id = 1")
+    return rows[0][0] if rows and rows[0][0] in CLAVES_VALIDAS else "violet-original"
+
+
 @router.get("", response_model=list[AparienciaReglaOut])
 def listar(current_user: UserOut = Depends(get_current_user)):
     conn = get_connection()
@@ -63,6 +69,7 @@ def listar(current_user: UserOut = Depends(get_current_user)):
             comercios_por_key.setdefault(key, []).append(comercio_id)
 
         imagenes = dict(conn.run("SELECT apariencia_key, imagen FROM apariencia_imagenes"))
+        automatico_default = _leer_automatico_default(conn)
 
         return [
             AparienciaReglaOut(
@@ -71,9 +78,29 @@ def listar(current_user: UserOut = Depends(get_current_user)):
                 visibilidad=reglas.get(a["key"], "todos"),
                 comercios=comercios_por_key.get(a["key"], []),
                 imagen=imagenes.get(a["key"]),
+                automatico_default=a["key"] == automatico_default,
             )
             for a in APARIENCIAS_CONOCIDAS
         ]
+    finally:
+        conn.close()
+
+
+@router.put("/{key}/automatico-default", response_model=AparienciaReglaOut)
+def marcar_automatico_default(key: str, current_user: UserOut = Depends(get_current_user)):
+    """Marca esta apariencia (la estrella) como el estilo que usa "Automático" en los
+    comercios fuera de temporada. Solo puede haber una a la vez: marcar una quita la estrella
+    de cualquier otra, porque es una sola fila en la tabla."""
+    if key not in CLAVES_VALIDAS:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Apariencia no reconocida")
+    conn = get_connection()
+    try:
+        conn.run(
+            "INSERT INTO apariencia_automatico (id, apariencia_key) VALUES (1, :k) "
+            "ON CONFLICT (id) DO UPDATE SET apariencia_key = EXCLUDED.apariencia_key, updated_at = now()",
+            k=key,
+        )
+        return _regla(conn, key)
     finally:
         conn.close()
 
@@ -190,6 +217,7 @@ def _regla(conn, key: str) -> AparienciaReglaOut:
     return AparienciaReglaOut(
         key=key, nombre=nombre, visibilidad=vis[0][0] if vis else "todos", comercios=comercios,
         imagen=img[0][0] if img else None,
+        automatico_default=key == _leer_automatico_default(conn),
     )
 
 
