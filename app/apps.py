@@ -1,7 +1,7 @@
 import re
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
 
 from app.auth import get_current_user
@@ -10,15 +10,20 @@ from app.schemas import UserOut
 
 router = APIRouter(prefix="/superadmin/apps", tags=["apps"])
 
-COLUMNS = ["id", "nombre", "plataforma", "dimensiones", "tamano_bytes", "imagen", "created_at"]
+COLUMNS = ["id", "nombre", "app_key", "plataforma", "dimensiones", "tamano_bytes", "imagen", "created_at"]
 MAX_ICONOS = 60
 MAX_CHARS_IMAGEN = 2_800_000  # ~2 MB una vez decodificada
 IMAGEN_DATA_URL = re.compile(r"^data:image/(png|jpe?g|webp|svg\+xml|x-icon|vnd\.microsoft\.icon);base64,[A-Za-z0-9+/=]+$")
 
+# Los cuatro aplicativos que hoy se listan en Aplicativos del front del cliente. Domicilios y
+# Cocina son apps móviles (Android/iOS); Windows y Driver son solo de escritorio Windows.
+APP_KEYS = ("domiciliario", "cocina", "escritorio", "driver")
+
 
 class IconoIn(BaseModel):
     nombre: str = Field(min_length=1, max_length=120)
-    plataforma: str = Field(default="todas", pattern="^(todas|android|ios)$")
+    app_key: str = Field(pattern="^(domiciliario|cocina|escritorio|driver)$")
+    plataforma: str = Field(default="todas", pattern="^(todas|android|ios|windows)$")
     dimensiones: str = Field(default="", max_length=20)
     imagen: str
 
@@ -33,6 +38,7 @@ class IconoIn(BaseModel):
 class IconoOut(BaseModel):
     id: int
     nombre: str
+    app_key: str
     plataforma: str
     dimensiones: str
     tamano_bytes: int
@@ -45,10 +51,16 @@ def _to_out(row) -> IconoOut:
 
 
 @router.get("/iconos", response_model=list[IconoOut])
-def listar(current_user: UserOut = Depends(get_current_user)):
+def listar(app_key: str | None = Query(default=None), current_user: UserOut = Depends(get_current_user)):
     conn = get_connection()
     try:
-        rows = conn.run(f"SELECT {', '.join(COLUMNS)} FROM app_iconos ORDER BY created_at DESC, id DESC")
+        if app_key:
+            rows = conn.run(
+                f"SELECT {', '.join(COLUMNS)} FROM app_iconos WHERE app_key = :k ORDER BY created_at DESC, id DESC",
+                k=app_key,
+            )
+        else:
+            rows = conn.run(f"SELECT {', '.join(COLUMNS)} FROM app_iconos ORDER BY created_at DESC, id DESC")
         return [_to_out(r) for r in rows]
     finally:
         conn.close()
@@ -65,9 +77,10 @@ def crear(payload: IconoIn, current_user: UserOut = Depends(get_current_user)):
         base64 = payload.imagen.split(",", 1)[1]
         tamano = (len(base64) * 3) // 4 - base64.count("=")
         rows = conn.run(
-            f"INSERT INTO app_iconos (nombre, plataforma, dimensiones, tamano_bytes, imagen) "
-            f"VALUES (:n, :p, :d, :t, :i) RETURNING {', '.join(COLUMNS)}",
-            n=payload.nombre.strip(), p=payload.plataforma, d=payload.dimensiones.strip(), t=tamano, i=payload.imagen,
+            f"INSERT INTO app_iconos (nombre, app_key, plataforma, dimensiones, tamano_bytes, imagen) "
+            f"VALUES (:n, :k, :p, :d, :t, :i) RETURNING {', '.join(COLUMNS)}",
+            n=payload.nombre.strip(), k=payload.app_key, p=payload.plataforma,
+            d=payload.dimensiones.strip(), t=tamano, i=payload.imagen,
         )
         return _to_out(rows[0])
     finally:
