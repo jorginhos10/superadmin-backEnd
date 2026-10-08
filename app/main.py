@@ -16,6 +16,7 @@ from app.comercios import router as comercios_router
 from app.dashboard import router as dashboard_router
 from app.database import get_connection
 from app.marketplace import router as marketplace_router
+from app.monitoreo import router as monitoreo_router
 from app.pagos_nequi import router as pagos_nequi_router
 from app.planes import router as planes_router
 from app.regiones import router as regiones_router
@@ -43,6 +44,7 @@ app.include_router(dashboard_router)
 app.include_router(planes_router)
 app.include_router(regiones_router)
 app.include_router(marketplace_router)
+app.include_router(monitoreo_router)
 app.include_router(pagos_nequi_router)
 app.include_router(soporte_router)
 
