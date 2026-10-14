@@ -53,3 +53,37 @@ def guardar_categoria_registros(payload: CategoriaRegistrosIn, current_user: Use
         return CategoriaRegistrosOut(store=payload.store, restobar=payload.restobar)
     finally:
         conn.close()
+
+
+class AutoaceptarOut(BaseModel):
+    autoaceptar: bool
+
+
+class AutoaceptarIn(BaseModel):
+    autoaceptar: bool
+
+
+@router.get("/autoaceptar-registros", response_model=AutoaceptarOut)
+def obtener_autoaceptar_registros(current_user: UserOut = Depends(get_current_user)):
+    """Si está activo, un comercio nuevo entra aprobado de una vez al enviar su registro,
+    sin esperar revisión manual del SuperAdmin."""
+    conn = get_connection()
+    try:
+        rows = conn.run("SELECT autoaceptar_registros FROM ajustes_generales WHERE id = 1")
+        return AutoaceptarOut(autoaceptar=bool(rows[0][0]) if rows else False)
+    finally:
+        conn.close()
+
+
+@router.put("/autoaceptar-registros", response_model=AutoaceptarOut)
+def guardar_autoaceptar_registros(payload: AutoaceptarIn, current_user: UserOut = Depends(get_current_user)):
+    conn = get_connection()
+    try:
+        conn.run(
+            "INSERT INTO ajustes_generales (id, autoaceptar_registros) VALUES (1, :a) "
+            "ON CONFLICT (id) DO UPDATE SET autoaceptar_registros = EXCLUDED.autoaceptar_registros, updated_at = now()",
+            a=payload.autoaceptar,
+        )
+        return AutoaceptarOut(autoaceptar=payload.autoaceptar)
+    finally:
+        conn.close()
