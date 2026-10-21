@@ -142,7 +142,9 @@ class SmsConfigOut(BaseModel):
     metodo: str
     auth_tipo: str
     auth_usuario: str
-    # La clave nunca vuelve al navegador: solo se indica si ya hay una guardada.
+    # Solo la ve quien administra la plataforma (esta ruta exige sesión de SuperAdmin) y el panel la muestra
+    # en un campo de contraseña con el ojito.
+    auth_secreto: str
     tiene_secreto: bool
     auth_header_nombre: str
     remitente: str
@@ -158,7 +160,7 @@ class SmsConfigIn(BaseModel):
     metodo: Literal["POST", "GET"] = "POST"
     auth_tipo: Literal["basic", "bearer", "header", "ninguna"] = "basic"
     auth_usuario: str = Field(default="", max_length=200)
-    # Vacío = conservar la clave que ya está guardada.
+    # None = conservar la clave guardada; texto vacío = borrarla.
     auth_secreto: Optional[str] = Field(default=None, max_length=1000)
     auth_header_nombre: str = Field(default="", max_length=80)
     remitente: str = Field(default="", max_length=60)
@@ -185,8 +187,7 @@ def _leer_config(conn) -> dict:
 
 
 def _config_out(cfg: dict) -> SmsConfigOut:
-    visible = {k: v for k, v in cfg.items() if k != "auth_secreto"}
-    return SmsConfigOut(**visible, tiene_secreto=bool(cfg["auth_secreto"]))
+    return SmsConfigOut(**cfg, tiene_secreto=bool(cfg["auth_secreto"]))
 
 
 def _validar_url(url: str) -> None:
@@ -237,7 +238,7 @@ def guardar_config(payload: SmsConfigIn, current_user: UserOut = Depends(get_cur
         secreto = (payload.auth_secreto or "").strip().strip("\"'").strip()
         if secreto and not re.fullmatch(r"[!-~]+", secreto):
             raise HTTPException(status_code=422, detail="La clave tiene espacios o caracteres no válidos. Cópiala de nuevo, sin comillas.")
-        nuevo["auth_secreto"] = secreto if secreto else actual["auth_secreto"]
+        nuevo["auth_secreto"] = secreto if payload.auth_secreto is not None else actual["auth_secreto"]
         for campo in ("proveedor", "url", "auth_usuario", "auth_header_nombre", "remitente", "cuerpo_plantilla", "exito_contiene"):
             nuevo[campo] = nuevo[campo].strip()
 
