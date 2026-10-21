@@ -42,6 +42,8 @@ def enviar(cfg: dict, destino: str, texto: str) -> str:
     auth = None
     tipo = cfg["auth_tipo"]
     secreto = (cfg["auth_secreto"] or "").strip().strip("\"'").strip()
+    if tipo != "ninguna" and not secreto:
+        raise EnvioFallido("Falta la clave o el token de la API: pégalo en la tuerca de Mensajería y guarda")
     if tipo == "basic":
         auth = (cfg["auth_usuario"].strip(), secreto)
     elif tipo == "bearer":
