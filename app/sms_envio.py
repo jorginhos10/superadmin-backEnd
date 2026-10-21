@@ -41,12 +41,13 @@ def enviar(cfg: dict, destino: str, texto: str) -> str:
     headers: dict[str, str] = {}
     auth = None
     tipo = cfg["auth_tipo"]
+    secreto = (cfg["auth_secreto"] or "").strip().strip("\"'").strip()
     if tipo == "basic":
-        auth = (cfg["auth_usuario"], cfg["auth_secreto"])
+        auth = (cfg["auth_usuario"].strip(), secreto)
     elif tipo == "bearer":
-        headers["Authorization"] = f"Bearer {cfg['auth_secreto']}"
+        headers["Authorization"] = f"Bearer {secreto}"
     elif tipo == "header":
-        headers[cfg["auth_header_nombre"] or "X-API-Key"] = cfg["auth_secreto"]
+        headers[(cfg["auth_header_nombre"] or "X-API-Key").strip()] = secreto
 
     valores = valores_de(cfg, destino, texto)
     kwargs: dict = {}
@@ -63,7 +64,7 @@ def enviar(cfg: dict, destino: str, texto: str) -> str:
     try:
         resp = httpx.request(cfg["metodo"], cfg["url"], headers=headers, auth=auth, timeout=TIMEOUT_S, **kwargs)
     except (httpx.HTTPError, ValueError) as exc:
-        raise EnvioFallido(f"No se pudo conectar con el proveedor: {type(exc).__name__}") from exc
+        raise EnvioFallido(f"No se pudo conectar con el proveedor: {type(exc).__name__} {str(exc)[:120]}".strip()) from exc
 
     cuerpo = resp.text[:300].replace("\n", " ")
     if not 200 <= resp.status_code < 300:

@@ -232,7 +232,12 @@ def guardar_config(payload: SmsConfigIn, current_user: UserOut = Depends(get_cur
     try:
         actual = _leer_config(conn)
         nuevo = payload.model_dump()
-        nuevo["auth_secreto"] = payload.auth_secreto if payload.auth_secreto else actual["auth_secreto"]
+        # Al pegar una clave es fácil arrastrar un espacio, un salto de línea o comillas; con eso el
+        # encabezado de autorización queda inválido y el envío falla antes de salir.
+        secreto = (payload.auth_secreto or "").strip().strip("\"'").strip()
+        if secreto and not re.fullmatch(r"[!-~]+", secreto):
+            raise HTTPException(status_code=422, detail="La clave tiene espacios o caracteres no válidos. Cópiala de nuevo, sin comillas.")
+        nuevo["auth_secreto"] = secreto if secreto else actual["auth_secreto"]
         for campo in ("proveedor", "url", "auth_usuario", "auth_header_nombre", "remitente", "cuerpo_plantilla", "exito_contiene"):
             nuevo[campo] = nuevo[campo].strip()
 
