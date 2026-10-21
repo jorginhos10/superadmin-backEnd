@@ -302,3 +302,46 @@ def probar_envio(payload: ProbarSmsIn, current_user: UserOut = Depends(get_curre
     finally:
         tconn.close()
     return ProbarSmsOut(ok=estado == "enviado", detalle=detalle)
+
+
+# --- Mapa de países: en cuáles se pide el código por SMS al registrarse --------------------------------
+
+
+class PaisSmsOut(BaseModel):
+    codigo_pais: str
+    pais: str
+    activa: bool
+    sms_verificacion: bool
+
+
+class PaisesSmsIn(BaseModel):
+    codigos: list[str] = Field(min_length=1, max_length=300)
+    activo: bool
+
+
+def _listar_paises(conn) -> list[PaisSmsOut]:
+    rows = conn.run("SELECT codigo_pais, pais, activo, sms_verificacion FROM regiones ORDER BY pais")
+    return [PaisSmsOut(codigo_pais=r[0], pais=r[1], activa=r[2], sms_verificacion=r[3]) for r in rows]
+
+
+@router.get("/paises", response_model=list[PaisSmsOut])
+def listar_paises_sms(current_user: UserOut = Depends(get_current_user)):
+    conn = get_connection()
+    try:
+        return _listar_paises(conn)
+    finally:
+        conn.close()
+
+
+@router.put("/paises", response_model=list[PaisSmsOut])
+def cambiar_paises_sms(payload: PaisesSmsIn, current_user: UserOut = Depends(get_current_user)):
+    """Enciende o apaga la verificación por SMS en uno o varios países (por código ISO de 2 letras)."""
+    codigos = [c.strip().upper() for c in payload.codigos if len(c.strip()) == 2]
+    if not codigos:
+        raise HTTPException(status_code=422, detail="Indica al menos un país")
+    conn = get_connection()
+    try:
+        conn.run("UPDATE regiones SET sms_verificacion = :a WHERE codigo_pais = ANY(:c)", a=payload.activo, c=codigos)
+        return _listar_paises(conn)
+    finally:
+        conn.close()
