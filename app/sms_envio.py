@@ -10,7 +10,7 @@ import httpx
 
 PLACEHOLDERS = ("telefono", "mensaje", "remitente", "usuario")
 _PATRON = re.compile(r"\{(" + "|".join(PLACEHOLDERS) + r")\}")
-TIMEOUT_S = 10.0
+TIMEOUT_S = 15.0
 
 
 class EnvioFallido(Exception):
@@ -65,6 +65,8 @@ def enviar(cfg: dict, destino: str, texto: str) -> str:
 
     try:
         resp = httpx.request(cfg["metodo"], cfg["url"], headers=headers, auth=auth, timeout=TIMEOUT_S, **kwargs)
+    except httpx.ReadTimeout:
+        return "Sin confirmación del proveedor (tiempo agotado): el mensaje pudo haber llegado"
     except (httpx.HTTPError, ValueError) as exc:
         raise EnvioFallido(f"No se pudo conectar con el proveedor: {type(exc).__name__} {str(exc)[:120]}".strip()) from exc
 

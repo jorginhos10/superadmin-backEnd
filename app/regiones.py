@@ -13,7 +13,7 @@ router = APIRouter(prefix="/superadmin/regiones", tags=["regiones"])
 
 UNIQUE_VIOLATION = "23505"
 
-REGION_COLUMNS = ["id", "pais", "codigo_pais", "moneda", "codigo_moneda", "activo", "orden", "fecha_creacion"]
+REGION_COLUMNS = ["id", "pais", "codigo_pais", "moneda", "codigo_moneda", "activo", "orden", "fecha_creacion", "indicativo"]
 
 
 class RegionIn(BaseModel):
@@ -22,6 +22,8 @@ class RegionIn(BaseModel):
     moneda: str = Field(min_length=1, max_length=100)
     codigo_moneda: str = Field(min_length=3, max_length=3)
     orden: int = 0
+    # Indicativo telefónico del país (57, 34…), con o sin "+"; se guarda solo con dígitos.
+    indicativo: str = Field(default="", max_length=7, pattern=r"^\+?[0-9]{0,5}$")
 
 
 class RegionOut(BaseModel):
@@ -33,6 +35,7 @@ class RegionOut(BaseModel):
     activo: bool
     orden: int
     fecha_creacion: datetime
+    indicativo: str = ""
 
 
 def _row_to_region(row) -> RegionOut:
@@ -63,13 +66,13 @@ def crear_region(payload: RegionIn, current_user: UserOut = Depends(get_current_
         try:
             rows = conn.run(
                 f"""
-                INSERT INTO regiones (pais, codigo_pais, moneda, codigo_moneda, orden)
-                VALUES (:pais, :codigo_pais, :moneda, :codigo_moneda, :orden)
+                INSERT INTO regiones (pais, codigo_pais, moneda, codigo_moneda, orden, indicativo)
+                VALUES (:pais, :codigo_pais, :moneda, :codigo_moneda, :orden, :indicativo)
                 RETURNING {', '.join(REGION_COLUMNS)}
                 """,
                 pais=payload.pais.strip(), codigo_pais=payload.codigo_pais.strip().upper(),
                 moneda=payload.moneda.strip(), codigo_moneda=payload.codigo_moneda.strip().upper(),
-                orden=payload.orden,
+                orden=payload.orden, indicativo=payload.indicativo.lstrip("+"),
             )
         except DatabaseError as exc:
             if exc.args and exc.args[0].get("C") == UNIQUE_VIOLATION:
@@ -89,12 +92,12 @@ def editar_region(region_id: int, payload: RegionIn, current_user: UserOut = Dep
             conn.run(
                 """
                 UPDATE regiones SET pais=:pais, codigo_pais=:codigo_pais, moneda=:moneda,
-                    codigo_moneda=:codigo_moneda, orden=:orden
+                    codigo_moneda=:codigo_moneda, orden=:orden, indicativo=:indicativo
                 WHERE id=:id
                 """,
                 pais=payload.pais.strip(), codigo_pais=payload.codigo_pais.strip().upper(),
                 moneda=payload.moneda.strip(), codigo_moneda=payload.codigo_moneda.strip().upper(),
-                orden=payload.orden, id=region_id,
+                orden=payload.orden, indicativo=payload.indicativo.lstrip("+"), id=region_id,
             )
         except DatabaseError as exc:
             if exc.args and exc.args[0].get("C") == UNIQUE_VIOLATION:
